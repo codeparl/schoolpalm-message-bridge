@@ -1,0 +1,36 @@
+{
+  "name": "@schoolpalm/message-bridge",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for message-based communication between SchoolPalm host and vendor modules.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "lint": "eslint 'src/**/*.{ts,tsx}' --fix",
+    "prepublishOnly": "npm run build",
+  "test": "vitest",
+  "test:watch": "vitest --watch"
+  },
+  "keywords": [
+    "schoolpalm",
+    "vue",
+    "inertia",
+    "module",
+    "iframe",
+    "postMessage",
+    "Unnovate Brains",
+    "typescript"
+  ],
+  "author": "Hassan Mugabo",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jsdom": "^27.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.5.1",
+    "@typescript-eslint/parser": "^6.5.1",
+    "eslint": "^8.50.0",
+    "jsdom": "^27.4.0",
+    "typescript": "^5.2.2",
+    "vitest": "^4.0.16"
+  }
+}
