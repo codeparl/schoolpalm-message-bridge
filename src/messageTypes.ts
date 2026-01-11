@@ -36,5 +36,9 @@ export enum MessageType {
   /** Module → Host: Reports an error to the host. */
   ERROR = 'error',
   /** Host → Module: Signals the module to exit and clean up. */
-  MODULE_EXIT = 'module:exit'
+  MODULE_EXIT = 'module:exit',
+  CONTEXT_UPDATE = 'context:update',
+  // messageTypes.ts
+  HEARTBEAT = 'heartbeat'
+
 }

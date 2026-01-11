@@ -1,93 +1,106 @@
-/**
- * @fileoverview Base bridge class for message-based communication.
- * @module @schoolpalm/message-bridge/bridgeBase
- */
+import { MessageType } from './messageTypes'
+import { MessagePayloadMap } from './messageMap'
+import { RequestPayload, ResponsePayload } from './payloadSchemas'
 
-// src/bridgeBase.ts
-import { MessageType } from './messageTypes';
-import { MessagePayload } from './payloadSchemas';
+type MessageHandler<T> = (payload: T) => void
 
-/**
- * Type definition for message handler functions.
- * @template T - The type of message payload this handler accepts.
- */
-type MessageHandler<T extends MessagePayload> = (payload: T) => void;
-
-/**
- * Base class for Host and Module bridges.
- *
- * This abstract base class provides the core functionality for message-based
- * communication between windows using the postMessage API. It handles sending
- * messages, registering listeners, and managing event listeners.
- *
- * @example
- * ```typescript
- * class CustomBridge extends BridgeBase {
- *   constructor(targetWindow: Window) {
- *     super(targetWindow, 'https://example.com');
- *   }
- *
- *   // Add custom methods here
- * }
- * ```
- */
 export class BridgeBase {
-  /** The target window to send messages to. */
-  protected targetWindow: Window;
-  /** The origin to restrict messages to. */
-  protected targetOrigin: string;
-  /** Map of message type to array of handler functions. */
-  private listeners: Map<MessageType, MessageHandler<any>[]> = new Map();
+  protected targetWindow: Window
+  protected targetOrigin: string
 
-  /**
-   * Creates a new BridgeBase instance.
-   * @param targetWindow - The window to send messages to.
-   * @param targetOrigin - The origin to restrict messages to (default: '*').
-   */
+  private listeners = new Map<MessageType, MessageHandler<any>[]>()
+  private pendingRequests = new Map<string, (payload: any) => void>()
+  private boundHandler: (event: MessageEvent) => void
+
   constructor(targetWindow: Window, targetOrigin: string = '*') {
-    this.targetWindow = targetWindow;
-    this.targetOrigin = targetOrigin;
-    window.addEventListener('message', this._handleMessage.bind(this));
+    this.targetWindow = targetWindow
+    this.targetOrigin = targetOrigin
+
+    this.boundHandler = this.handleMessage.bind(this)
+    window.addEventListener('message', this.boundHandler)
   }
 
-  /**
-   * Sends a message to the target window.
-   * @template T - The type of the message payload.
-   * @param type - The message type to send.
-   * @param payload - The payload data to send.
-   */
-  send<T extends MessagePayload>(type: MessageType, payload: T) {
-    this.targetWindow.postMessage({ type, payload }, this.targetOrigin);
+  // --------------------
+  // Send (typed)
+  // --------------------
+  send<T extends MessageType>(
+    type: T,
+    payload: MessagePayloadMap[T]
+  ) {
+    this.targetWindow.postMessage({ type, payload }, this.targetOrigin)
   }
 
-  /**
-   * Registers a listener for a specific message type.
-   * @template T - The type of the message payload.
-   * @param type - The message type to listen for.
-   * @param callback - The function to call when a message of this type is received.
-   */
-  on<T extends MessagePayload>(type: MessageType, callback: MessageHandler<T>) {
-    if (!this.listeners.has(type)) this.listeners.set(type, []);
-    this.listeners.get(type)?.push(callback);
+  // --------------------
+  // Request / Response
+  // --------------------
+ request<R = any>(
+  type: MessageType,
+  payload: RequestPayload,
+  timeout = 5000
+): Promise<R> {
+  return new Promise((resolve, reject) => {
+    const requestId = payload.requestId
+
+    this.pendingRequests.set(requestId, (response: ResponsePayload) => {
+      if (response.status === 'error') {
+        reject(new Error(response.error ?? 'Unknown error'))
+      } else {
+        resolve(response.payload as R)
+      }
+    })
+
+    this.send(type, payload)
+
+    setTimeout(() => {
+      if (this.pendingRequests.has(requestId)) {
+        this.pendingRequests.delete(requestId)
+        reject(new Error(`Request ${payload.type} timed out`))
+      }
+    }, timeout)
+  })
+}
+
+
+  // --------------------
+  // Listeners (typed)
+  // --------------------
+  on<T extends MessageType>(
+    type: T,
+    callback: MessageHandler<MessagePayloadMap[T]>
+  ) {
+    if (!this.listeners.has(type)) {
+      this.listeners.set(type, [])
+    }
+    this.listeners.get(type)!.push(callback)
   }
 
-  /**
-   * Internal message handler for incoming postMessage events.
-   * @private
-   * @param event - The message event received.
-   */
-  private _handleMessage(event: MessageEvent) {
-    const { type, payload } = event.data || {};
-    if (!type || !this.listeners.has(type)) return;
-    this.listeners.get(type)?.forEach(cb => cb(payload));
+  // --------------------
+  // Dispatcher
+  // --------------------
+  protected handleMessage(event: MessageEvent) {
+    if (this.targetOrigin !== '*' && event.origin !== this.targetOrigin) return
+
+    const { type, payload } = event.data || {}
+    if (!type) return
+
+    // Handle responses
+    if (type === MessageType.DATA_RESPONSE) {
+      const response = payload as ResponsePayload
+      const resolver = this.pendingRequests.get(response.requestId)
+      if (resolver) {
+        resolver(response)
+        this.pendingRequests.delete(response.requestId)
+        return
+      }
+    }
+
+    const handlers = this.listeners.get(type)
+    handlers?.forEach(cb => cb(payload))
   }
 
-  /**
-   * Cleans up event listeners and resources.
-   * Call this method when the bridge is no longer needed.
-   */
   destroy() {
-    window.removeEventListener('message', this._handleMessage.bind(this));
-    this.listeners.clear();
+    window.removeEventListener('message', this.boundHandler)
+    this.listeners.clear()
+    this.pendingRequests.clear()
   }
 }

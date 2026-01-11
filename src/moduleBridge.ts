@@ -1,79 +1,100 @@
-/**
- * @fileoverview Module-side bridge for communication with the host application.
- * @module @schoolpalm/message-bridge/moduleBridge
- */
-
-// src/moduleBridge.ts
-import { BridgeBase } from './bridgeBase';
-import { MessageType } from './messageTypes';
+import { BridgeBase } from './bridgeBase'
+import { MessageType } from './messageTypes'
 import {
   HandshakeReadyPayload,
   UIUpdatePayload,
-  ErrorPayload
-} from './payloadSchemas';
+  ErrorPayload,
+  RequestPayload,
+  ResponsePayload,
+  HeartbeatPayload
+} from './payloadSchemas'
 
-/**
- * Module-side bridge for communication with the host application.
- *
- * This class extends BridgeBase to provide module-specific functionality for
- * communicating with the parent host application. It handles handshake,
- * UI updates, and error reporting from the embedded module.
- *
- * @example
- * ```typescript
- * const moduleBridge = new ModuleBridge('https://host.example.com');
- *
- * // Send handshake when module is ready
- * moduleBridge.sendHandshake({
- *   version: '1.0.0',
- *   timestamp: Date.now()
- * });
- *
- * // Update UI in the host
- * moduleBridge.sendUIUpdate({
- *   title: 'Dashboard',
- *   breadcrumb: ['Home', 'Dashboard'],
- *   theme: 'dark'
- * });
- *
- * // Listen for module start from host
- * moduleBridge.on(MessageType.MODULE_START, (payload) => {
- *   console.log('Module started:', payload.route);
- * });
- * ```
- */
 export class ModuleBridge extends BridgeBase {
-  /**
-   * Creates a new ModuleBridge instance.
-   * @param targetOrigin - The origin to restrict messages to (default: '*').
-   */
+  private startedPayload: any | null = null
+
   constructor(targetOrigin: string = '*') {
-    super(window.parent, targetOrigin);
+    super(window.parent, targetOrigin)
   }
 
-  /**
-   * Notifies the host application that the module is ready.
-   * This should be called after the module has initialized.
-   * @param payload - The handshake payload containing version and timestamp.
-   */
+  // --------------------
+  // Handshake
+  // --------------------
   sendHandshake(payload: HandshakeReadyPayload) {
-    this.send(MessageType.HANDSHAKE_READY, payload);
+    this.send(MessageType.HANDSHAKE_READY, payload)
   }
 
-  /**
-   * Notifies the host application of UI updates.
-   * This includes changes to title, breadcrumb, and theme.
-   * @param payload - The UI update payload.
-   */
+  // --------------------
+  // Start (sticky)
+  // --------------------
+  onModuleStart(callback: (payload: any) => void) {
+    if (this.startedPayload) {
+      callback(this.startedPayload)
+    }
+
+    this.on(MessageType.MODULE_START, payload => {
+      this.startedPayload = payload
+      callback(payload)
+    })
+  }
+
+
+
+
+onHeartbeat(callback?: (payload: HeartbeatPayload) => void) {
+  this.on<HeartbeatPayload>(MessageType.HEARTBEAT, payload => {
+    // Ignore ACK-only heartbeats
+    if (payload?.ack) return
+
+    callback?.(payload)
+
+    const response: HeartbeatPayload = {
+      timestamp: Date.now(),
+      ack: true
+    }
+
+    this.send(MessageType.HEARTBEAT, response)
+  })
+}
+
+
+
+  // --------------------
+  // UI / Errors
+  // --------------------
   sendUIUpdate(payload: UIUpdatePayload) {
-    this.send(MessageType.UI_UPDATE, payload);
+    this.send(MessageType.UI_UPDATE, payload)
   }
 
-  /**
-   * Notifies the host application of an error.
-   * @param payload - The error payload containing error details.
-   */
   sendError(payload: ErrorPayload) {
-    this.send(MessageType.ERROR, payload);
+    this.send(MessageType.ERROR, payload)
+  }
+
+  // --------------------
+  // Requests
+  // --------------------
+  requestData<T = any, R = any>(
+    type: string,
+    payload?: T,
+    timeout = 5000
+  ): Promise<R> {
+    const request: RequestPayload = {
+      requestId: crypto.randomUUID(),
+      type,
+      payload: payload as any
+    }
+    return this.request<RequestPayload, R>(
+      MessageType.DATA_REQUEST,
+      request,
+      timeout
+    )
+  }
+
+  respondData(requestId: string, data: any, status: 'success' | 'error' = 'success') {
+    const response: ResponsePayload = {
+      requestId,
+      status,
+      payload: data
+    }
+    this.send(MessageType.DATA_RESPONSE, response)
   }
 }

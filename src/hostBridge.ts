@@ -1,63 +1,162 @@
-/**
- * @fileoverview Host-side bridge for communication with embedded modules.
- * @module @schoolpalm/message-bridge/hostBridge
- */
+import { BridgeBase } from './bridgeBase'
+import { MessageType } from './messageTypes'
+import {
+  ModuleStartPayload,
+  ModuleExitPayload,
+  UIUpdatePayload,
+  ErrorPayload,
+  ModuleContextPayload,
+  HandshakeReadyPayload,
+  RequestPayload
+} from './payloadSchemas'
+import { PROTOCOL_VERSION } from './protocol'
 
-// src/hostBridge.ts
-import { BridgeBase } from './bridgeBase';
-import { MessageType } from './messageTypes';
-import { ModuleStartPayload } from './payloadSchemas';
-
-/**
- * Host-side bridge for communication with embedded modules.
- *
- * This class extends BridgeBase to provide host-specific functionality for
- * communicating with modules embedded in iframes. It handles initialization
- * and termination of modules.
- *
- * @example
- * ```typescript
- * const iframe = document.getElementById('module-iframe') as HTMLIFrameElement;
- * const hostBridge = new HostBridge(iframe, 'https://module.example.com');
- *
- * // Start a module
- * hostBridge.sendModuleStart({
- *   route: '/dashboard',
- *   context: { userId: 123 },
- *   timestamp: Date.now()
- * });
- *
- * // Listen for UI updates from the module
- * hostBridge.on(MessageType.UI_UPDATE, (payload) => {
- *   console.log('UI Update:', payload);
- * });
- * ```
- */
 export class HostBridge extends BridgeBase {
-  /**
-   * Creates a new HostBridge instance.
-   * @param iframe - The iframe element containing the module.
-   * @param targetOrigin - The origin to restrict messages to (default: '*').
-   */
+  private handshakeCompleted = false
+  private handshakePayload: HandshakeReadyPayload | null = null
+  private pendingStartPayload: ModuleStartPayload | null = null
+
   constructor(iframe: HTMLIFrameElement, targetOrigin: string = '*') {
-    super(iframe.contentWindow!, targetOrigin);
+    if (!iframe.contentWindow) {
+      throw new Error('Iframe has no contentWindow')
+    }
+    super(iframe.contentWindow, targetOrigin)
   }
 
-  /**
-   * Sends a module-start message to the embedded module.
-   * This initializes the module with the provided route and context.
-   * @param payload - The module start payload containing route, context, and timestamp.
-   */
+  // --------------------
+  // Handshake (sticky)
+  // --------------------
+onHandshakeReady(callback: (payload: HandshakeReadyPayload) => void) {
+  if (this.handshakeCompleted && this.handshakePayload) {
+    callback(this.handshakePayload)
+    return
+  }
+
+  this.on(MessageType.HANDSHAKE_READY, payload => {
+    // ✅ payload is HandshakeReadyPayload
+    if (payload.version !== PROTOCOL_VERSION) {
+      console.warn(
+        `Protocol mismatch: host=${PROTOCOL_VERSION}, module=${payload.version}`
+      )
+    }
+
+    this.handshakeCompleted = true
+    this.handshakePayload = payload
+    callback(payload)
+
+    if (this.pendingStartPayload) {
+      this.sendModuleStart(this.pendingStartPayload)
+      this.pendingStartPayload = null
+    }
+  })
+}
+
+
+// hostBridge.ts
+private heartbeatTimer?: number
+
+startHeartbeat(interval = 5000) {
+  this.stopHeartbeat()
+
+  this.heartbeatTimer = window.setInterval(() => {
+    this.send(MessageType.HEARTBEAT, { ts: Date.now() })
+  }, interval)
+}
+
+stopHeartbeat() {
+  if (this.heartbeatTimer) {
+    clearInterval(this.heartbeatTimer)
+    this.heartbeatTimer = undefined
+  }
+}
+
+private lastHeartbeat = Date.now()
+
+listenHeartbeat(timeout = 15000) {
+  this.on(MessageType.HEARTBEAT, () => {
+    this.lastHeartbeat = Date.now()
+  })
+
+  setInterval(() => {
+    if (Date.now() - this.lastHeartbeat > timeout) {
+      console.error('Module heartbeat lost')
+      this.sendModuleExit('heartbeat-timeout')
+    }
+  }, timeout)
+}
+
+
+  // --------------------
+  // Start (idempotent)
+  // --------------------
+  startModule(payload: ModuleStartPayload, timeout = 5000) {
+    if (this.handshakeCompleted) {
+      this.sendModuleStart(payload)
+      return
+    }
+
+    this.pendingStartPayload = payload
+
+    const timer = setTimeout(() => {
+      console.error('Module handshake timeout')
+    }, timeout)
+
+    this.onHandshakeReady(() => clearTimeout(timer))
+  }
+
   sendModuleStart(payload: ModuleStartPayload) {
-    this.send(MessageType.MODULE_START, payload);
+    this.send(MessageType.MODULE_START, payload)
   }
 
-  /**
-   * Sends a module-exit message to the embedded module.
-   * This signals the module to clean up and terminate.
-   * @param reason - Optional reason for the module exit.
-   */
   sendModuleExit(reason?: string) {
-    this.send(MessageType.MODULE_EXIT, { reason });
+    this.send(MessageType.MODULE_EXIT, { reason } as ModuleExitPayload)
+  }
+
+  // --------------------
+  // UI / Errors
+  // --------------------
+  onUIUpdate(callback: (payload: UIUpdatePayload) => void) {
+    this.on(MessageType.UI_UPDATE, callback)
+  }
+
+  onError(callback: (payload: ErrorPayload) => void) {
+    this.on(MessageType.ERROR, callback)
+  }
+
+  // --------------------
+  // Context sync
+  // --------------------
+  sendContextUpdate(payload: ModuleContextPayload) {
+    this.send(MessageType.CONTEXT_UPDATE, payload)
+  }
+
+  // --------------------
+  // Requests
+  // --------------------
+ requestData<T = any, R = any>(
+  type: string,
+  payload?: T,
+  timeout = 5000
+): Promise<R> {
+  const request: RequestPayload = {
+    requestId: crypto.randomUUID(),
+    type,
+    payload: payload as any,
+  }
+
+  return this.request<R>(
+    MessageType.DATA_REQUEST,
+    request,
+    timeout
+  )
+}
+
+  // --------------------
+  // Reset (reconnect)
+  // --------------------
+  reset() {
+    this.handshakeCompleted = false
+    this.handshakePayload = null
+    this.pendingStartPayload = null
   }
 }
