@@ -6,7 +6,8 @@ import {
   ErrorPayload,
   RequestPayload,
   ResponsePayload,
-  HeartbeatPayload
+  HeartbeatPayload,
+  MessagePayload
 } from './payloadSchemas'
 
 export class ModuleBridge extends BridgeBase {
@@ -37,26 +38,24 @@ export class ModuleBridge extends BridgeBase {
     })
   }
 
+  // --------------------
+  // Heartbeat
+  // --------------------
+  onHeartbeat(callback?: (payload: HeartbeatPayload) => void) {
+    this.on(MessageType.HEARTBEAT, (payload: MessagePayload) => {
+      const hb = payload as HeartbeatPayload
 
+      // Ignore ACK-only heartbeats
+      if (hb.ack) return
 
+      callback?.(hb)
 
-onHeartbeat(callback?: (payload: HeartbeatPayload) => void) {
-  this.on<HeartbeatPayload>(MessageType.HEARTBEAT, payload => {
-    // Ignore ACK-only heartbeats
-    if (payload?.ack) return
-
-    callback?.(payload)
-
-    const response: HeartbeatPayload = {
-      timestamp: Date.now(),
-      ack: true
-    }
-
-    this.send(MessageType.HEARTBEAT, response)
-  })
-}
-
-
+      this.send(MessageType.HEARTBEAT, {
+        timestamp: Date.now(),
+        ack: true
+      } as HeartbeatPayload)
+    })
+  }
 
   // --------------------
   // UI / Errors
@@ -72,23 +71,35 @@ onHeartbeat(callback?: (payload: HeartbeatPayload) => void) {
   // --------------------
   // Requests
   // --------------------
-  requestData<T = any, R = any>(
-    type: string,
-    payload?: T,
-    timeout = 5000
-  ): Promise<R> {
-    const request: RequestPayload = {
-      requestId: crypto.randomUUID(),
-      type,
-      payload: payload as any
-    }
-    return this.request<RequestPayload, R>(
-      MessageType.DATA_REQUEST,
-      request,
-      timeout
-    )
+async requestData<T = any, R = any>(
+  type: string,
+  payload?: T,
+  timeout = 5000
+): Promise<R> {
+  const request: RequestPayload = {
+    requestId: crypto.randomUUID(),
+    type,
+    payload: payload as any
   }
 
+  // Call base request (returns generic MessagePayload)
+  const response = (await this.request<MessagePayload>(
+    MessageType.DATA_REQUEST,
+    request,
+    timeout
+  )) as ResponsePayload // Cast safely here
+
+  if (response.status === 'error') {
+    throw new Error(response.error || 'Unknown error from host')
+  }
+
+  return response.payload as R
+}
+
+
+  // --------------------
+  // Respond to host requests
+  // --------------------
   respondData(requestId: string, data: any, status: 'success' | 'error' = 'success') {
     const response: ResponsePayload = {
       requestId,

@@ -7,7 +7,8 @@ import {
   ErrorPayload,
   ModuleContextPayload,
   HandshakeReadyPayload,
-  RequestPayload
+  RequestPayload,
+  HeartbeatPayload
 } from './payloadSchemas'
 import { PROTOCOL_VERSION } from './protocol'
 
@@ -59,9 +60,10 @@ startHeartbeat(interval = 5000) {
   this.stopHeartbeat()
 
   this.heartbeatTimer = window.setInterval(() => {
-    this.send(MessageType.HEARTBEAT, { ts: Date.now() })
+    this.send(MessageType.HEARTBEAT, { timestamp: Date.now() } as HeartbeatPayload)
   }, interval)
 }
+
 
 stopHeartbeat() {
   if (this.heartbeatTimer) {

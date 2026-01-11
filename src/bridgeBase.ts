@@ -1,5 +1,5 @@
 import { MessageType } from './messageTypes'
-import { MessagePayloadMap } from './messageMap'
+import { MessagePayloadMap } from './payloadSchemas'
 import { RequestPayload, ResponsePayload } from './payloadSchemas'
 
 type MessageHandler<T> = (payload: T) => void
