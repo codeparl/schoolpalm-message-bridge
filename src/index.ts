@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { HostBridge, ModuleBridge, MessageType } from '@schoolpalm/message-bridge';
+ * import { HostBridge, ModuleBridge, MessageType, ProtocolState, PROTOCOL_VERSION } from '@schoolpalm/message-bridge';
  * ```
  */
 
@@ -17,4 +17,5 @@ export { BridgeBase } from './bridgeBase';
 export { HostBridge } from './hostBridge';
 export { ModuleBridge } from './moduleBridge';
 export { MessageType } from './messageTypes';
+export { ProtocolState, PROTOCOL_VERSION } from './protocol'; // ✅ new export
 export * from './payloadSchemas';

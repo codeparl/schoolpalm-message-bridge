@@ -1,6 +1,6 @@
 {
   "name": "@schoolpalm/message-bridge",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "TypeScript SDK for message-based communication between SchoolPalm host and vendor modules.",
   "type": "module",
   "main": "dist/index.js",
